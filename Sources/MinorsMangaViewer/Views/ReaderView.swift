@@ -571,7 +571,7 @@ final class ReaderInteractionOverlayView: NSView {
     /// 滚轮滚动累积量，超过阈值才触发翻页，避免轻微滚动就翻页。
     private var scrollAccumulator: CGFloat = 0
     /// 触发一次翻页所需的最小滚动量。数值越大灵敏度越低。
-    private let scrollThreshold: CGFloat = 40
+    private let scrollThreshold: CGFloat = 15
 
     func update(
         layout: ReaderLayout,
