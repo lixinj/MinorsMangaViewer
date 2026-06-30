@@ -41,9 +41,9 @@ struct WorkGridItem: View {
                 .frame(maxWidth: .infinity)
         }
         .task {
-            guard let folderURL = work.primaryFolderURL else { return }
+            guard let version = work.primaryVersion else { return }
             isLoading = true
-            thumbnail = await ThumbnailCache.shared.thumbnail(for: folderURL)
+            thumbnail = await ThumbnailCache.shared.thumbnail(for: version)
             isLoading = false
         }
     }

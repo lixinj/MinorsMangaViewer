@@ -7,6 +7,16 @@ public struct WorkVersion: Identifiable, Hashable, Sendable {
     public let type: FolderType
     public let parsed: ParsedFolderName
 
+    /// 该版本是否为压缩包（cbz/zip/cbr/rar）。
+    public var isArchive: Bool {
+        ArchiveService.isArchive(path)
+    }
+
+    /// 该版本是否为本地文件夹。
+    public var isFolder: Bool {
+        !isArchive
+    }
+
     private static let tagKeywords = [
         "無修正", "dl版", "漢化", "汉化", "mjk-", "t-", "z-", "个人", "組", "组",
         "fakku", "faaku", "無毒", "heart♡", "不想記名", "黑条", "中扫", "后期",

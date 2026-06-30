@@ -10,9 +10,17 @@ let package = Package(
             targets: ["MinorsMangaViewer"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", from: "0.9.0"),
+        .package(url: "https://github.com/mtgto/Unrar.swift.git", from: "0.3.0")
+    ],
     targets: [
         .executableTarget(
             name: "MinorsMangaViewer",
+            dependencies: [
+                "ZIPFoundation",
+                .product(name: "Unrar", package: "Unrar.swift")
+            ],
             path: "Sources/MinorsMangaViewer",
             resources: [
                 .process("Resources/Assets.xcassets"),

@@ -411,7 +411,7 @@ struct ReaderView: View {
         case .single:
             return AnyView(
                 singlePageContent(
-                    url: viewModel.imageURLs[safe: viewModel.currentPageIndex],
+                    index: viewModel.currentPageIndex,
                     maxWidth: maxWidth,
                     maxHeight: maxHeight
                 )
@@ -421,7 +421,7 @@ struct ReaderView: View {
             if range.count == 1 {
                 return AnyView(
                     singlePageContent(
-                        url: viewModel.imageURLs[safe: range.lowerBound],
+                        index: range.lowerBound,
                         maxWidth: maxWidth,
                         maxHeight: maxHeight
                     )
@@ -429,8 +429,8 @@ struct ReaderView: View {
             }
             return AnyView(
                 doublePageContent(
-                    leftURL: viewModel.imageURLs[safe: range.lowerBound + 1],
-                    rightURL: viewModel.imageURLs[safe: range.lowerBound],
+                    leftIndex: range.lowerBound + 1,
+                    rightIndex: range.lowerBound,
                     maxWidth: maxWidth,
                     maxHeight: maxHeight
                 )
@@ -440,7 +440,7 @@ struct ReaderView: View {
             if range.count == 1 {
                 return AnyView(
                     singlePageContent(
-                        url: viewModel.imageURLs[safe: range.lowerBound],
+                        index: range.lowerBound,
                         maxWidth: maxWidth,
                         maxHeight: maxHeight
                     )
@@ -448,8 +448,8 @@ struct ReaderView: View {
             }
             return AnyView(
                 doublePageContent(
-                    leftURL: viewModel.imageURLs[safe: range.lowerBound],
-                    rightURL: viewModel.imageURLs[safe: range.lowerBound + 1],
+                    leftIndex: range.lowerBound,
+                    rightIndex: range.lowerBound + 1,
                     maxWidth: maxWidth,
                     maxHeight: maxHeight
                 )
@@ -457,9 +457,9 @@ struct ReaderView: View {
         }
     }
 
-    private func doublePageContent(leftURL: URL?, rightURL: URL?, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
-        let leftImage = leftURL.flatMap { viewModel.cachedImage(for: $0) }
-        let rightImage = rightURL.flatMap { viewModel.cachedImage(for: $0) }
+    private func doublePageContent(leftIndex: Int?, rightIndex: Int?, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+        let leftImage = leftIndex.flatMap { viewModel.cachedImage(at: $0) }
+        let rightImage = rightIndex.flatMap { viewModel.cachedImage(at: $0) }
 
         if let leftImage = leftImage, let rightImage = rightImage {
             let leftAspect = leftImage.size.width / leftImage.size.height
@@ -483,11 +483,11 @@ struct ReaderView: View {
 
         return AnyView(
             HStack(spacing: 0) {
-                if let leftURL = leftURL {
-                    PageImage(url: leftURL, viewModel: viewModel)
+                if let leftIndex = leftIndex {
+                    PageImage(index: leftIndex, url: viewModel.imageURLs[leftIndex], viewModel: viewModel, onInsertBlankPage: insertBlankPage)
                 }
-                if let rightURL = rightURL {
-                    PageImage(url: rightURL, viewModel: viewModel)
+                if let rightIndex = rightIndex {
+                    PageImage(index: rightIndex, url: viewModel.imageURLs[rightIndex], viewModel: viewModel, onInsertBlankPage: insertBlankPage)
                 }
             }
             .scaledToFit()
@@ -495,11 +495,11 @@ struct ReaderView: View {
         )
     }
 
-    private func singlePageContent(url: URL?, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
+    private func singlePageContent(index: Int?, maxWidth: CGFloat, maxHeight: CGFloat) -> some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
-            if let url = url {
-                PageImage(url: url, viewModel: viewModel)
+            if let index = index, index >= 0, index < viewModel.imageURLs.count {
+                PageImage(index: index, url: viewModel.imageURLs[index], viewModel: viewModel, onInsertBlankPage: insertBlankPage)
                     .frame(maxWidth: maxWidth, maxHeight: maxHeight)
             }
             Spacer(minLength: 0)
@@ -704,13 +704,15 @@ final class ReaderInteractionOverlayView: NSView {
 
 @MainActor
 struct PageImage: View {
+    let index: Int
     let url: URL
     @ObservedObject var viewModel: ReaderViewModel
+    var onInsertBlankPage: ((URL) -> Void)?
     @State private var loadFailed = false
 
     var body: some View {
         Group {
-            if let image = viewModel.cachedImage(for: url) {
+            if let image = viewModel.cachedImage(at: index) {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFit()
@@ -722,14 +724,17 @@ struct PageImage: View {
                     .controlSize(.large)
             }
         }
-        .task(id: url) {
-            if viewModel.cachedImage(for: url) == nil {
-                let image = await Task.detached(priority: .userInitiated) {
-                    return NSImage(contentsOf: url)
-                }.value
-                if let image = image {
-                    viewModel.setCachedImage(image, for: url)
-                } else {
+        .contextMenu {
+            if !viewModel.isArchiveVersion {
+                Button("在当前页前插入空白页") {
+                    onInsertBlankPage?(url)
+                }
+            }
+        }
+        .task(id: index) {
+            if viewModel.cachedImage(at: index) == nil {
+                let image = await viewModel.loadImage(at: index)
+                if image == nil {
                     loadFailed = true
                 }
             }

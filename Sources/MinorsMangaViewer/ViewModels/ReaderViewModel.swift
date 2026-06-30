@@ -18,7 +18,10 @@ final class ReaderViewModel: ObservableObject {
     @Published var filenameFilters: [String] = []
 
     private let progressStore = ReadingProgressStore.shared
-    @Published private var imageCache: [URL: NSImage] = [:]
+    @Published private var imageCache: [Int: NSImage] = [:]
+
+    private var pageProvider: (any PageProvider)?
+    private(set) var isArchiveVersion: Bool = false
 
     /// 项目内嵌的空白页源文件 URL。
     static func blankPageSourceURL() -> URL? {
@@ -27,7 +30,11 @@ final class ReaderViewModel: ObservableObject {
 
     /// 在指定图片之前插入一张空白页图片到源文件夹。
     /// 空白页文件名会在原文件名后追加一个空格，使其排序紧邻原图之前。
+    /// 仅支持文件夹版本，压缩包版本会抛出错误。
     func insertBlankPage(before targetURL: URL) async throws {
+        guard !isArchiveVersion else {
+            throw InsertBlankPageError.archiveNotSupported
+        }
         guard let sourceURL = Self.blankPageSourceURL() else {
             throw InsertBlankPageError.missingSourceImage
         }
@@ -58,9 +65,9 @@ final class ReaderViewModel: ObservableObject {
             let blankPageIndex = max(0, newIndex - 1)
             // 预加载空白页图片，确保双页显示逻辑能正确判断其为竖图
             if blankPageIndex < imageURLs.count,
-               cachedImage(for: imageURLs[blankPageIndex]) == nil,
-               let image = NSImage(contentsOf: imageURLs[blankPageIndex]) {
-                setCachedImage(image, for: imageURLs[blankPageIndex])
+               cachedImage(at: blankPageIndex) == nil,
+               let image = await loadImage(at: blankPageIndex) {
+                setCachedImage(image, at: blankPageIndex)
             }
             currentPageIndex = blankPageIndex
             saveProgress()
@@ -68,18 +75,37 @@ final class ReaderViewModel: ObservableObject {
         }
     }
 
-    func cachedImage(for url: URL) -> NSImage? {
-        imageCache[url]
+    func cachedImage(at index: Int) -> NSImage? {
+        imageCache[index]
     }
 
-    func setCachedImage(_ image: NSImage?, for url: URL) {
-        imageCache[url] = image
+    func setCachedImage(_ image: NSImage?, at index: Int) {
+        imageCache[index] = image
+    }
+
+    /// 异步加载指定索引的图片。会优先使用缓存，然后根据版本类型从文件夹或压缩包读取。
+    func loadImage(at index: Int) async -> NSImage? {
+        guard index >= 0, index < imageURLs.count else { return nil }
+        if let cached = cachedImage(at: index) {
+            return cached
+        }
+
+        do {
+            let image = try await pageProvider?.image(at: index)
+                ?? NSImage(contentsOf: imageURLs[index])
+            if let image = image {
+                setCachedImage(image, at: index)
+            }
+            return image
+        } catch {
+            return nil
+        }
     }
 
     /// 判断图片是否为竖图（高大于宽）。使用图片表示的像素尺寸，比 NSImage.size 更可靠。
     /// 若图片尚未缓存，按横图处理。
-    func isPortrait(_ url: URL) -> Bool {
-        guard let image = cachedImage(for: url) else { return false }
+    func isPortrait(at index: Int) -> Bool {
+        guard let image = cachedImage(at: index) else { return false }
         if let representation = image.representations.first {
             return representation.pixelsHigh > representation.pixelsWide
         }
@@ -101,15 +127,14 @@ final class ReaderViewModel: ObservableObject {
             return 0..<1
         }
 
-        let currentURL = imageURLs[currentPageIndex]
-        if !isPortrait(currentURL) {
+        if !isPortrait(at: currentPageIndex) {
             // 横图单独显示
             return currentPageIndex..<(currentPageIndex + 1)
         }
 
         // 竖图：下一张也是竖图才并排
         if currentPageIndex + 1 < imageURLs.count,
-           isPortrait(imageURLs[currentPageIndex + 1]) {
+           isPortrait(at: currentPageIndex + 1) {
             return currentPageIndex..<(currentPageIndex + 2)
         }
 
@@ -123,13 +148,9 @@ final class ReaderViewModel: ObservableObject {
         let end = min(imageURLs.count - 1, currentPageIndex + window + (layout == .single ? 0 : 1))
 
         for i in start...end {
-            let url = imageURLs[i]
-            guard imageCache[url] == nil else { continue }
+            guard cachedImage(at: i) == nil else { continue }
             Task(priority: .background) { [weak self] in
-                let image = NSImage(contentsOf: url)
-                await MainActor.run {
-                    self?.setCachedImage(image, for: url)
-                }
+                _ = await self?.loadImage(at: i)
             }
         }
     }
@@ -170,15 +191,31 @@ final class ReaderViewModel: ObservableObject {
         currentVersion = version
         progressStore.set(versionID: version.id.uuidString, for: work.id.uuidString)
 
+        // 关闭旧的 provider，清理临时目录
+        pageProvider?.close()
+        pageProvider = nil
+        imageCache.removeAll()
+
         do {
-            let allURLs = try await FolderScanner.imageFiles(in: version.path)
-            imageURLs = allURLs.filter { url in
-                !filenameFilters.contains { filter in
-                    guard !filter.isEmpty else { return false }
-                    if url.lastPathComponent == filter { return true }
-                    return url.pathComponents.contains(filter)
+            let provider = try await ArchiveService.provider(for: version.path)
+            pageProvider = provider
+            isArchiveVersion = version.isArchive
+
+            // 生成页面标识 URL：文件夹用真实路径，压缩包用虚拟路径
+            let count = provider.pageCount
+            if version.isArchive {
+                imageURLs = (0..<count).map { version.path.appendingPathComponent("__page__\($0)") }
+            } else {
+                let allURLs = try await FolderScanner.imageFiles(in: version.path)
+                imageURLs = allURLs.filter { url in
+                    !filenameFilters.contains { filter in
+                        guard !filter.isEmpty else { return false }
+                        if url.lastPathComponent == filter { return true }
+                        return url.pathComponents.contains(filter)
+                    }
                 }
             }
+
             if preservingPage {
                 if previousPage < imageURLs.count {
                     currentPageIndex = previousPage
@@ -194,6 +231,7 @@ final class ReaderViewModel: ObservableObject {
         } catch {
             imageURLs = []
             currentPageIndex = 0
+            isArchiveVersion = false
         }
     }
 
@@ -202,8 +240,7 @@ final class ReaderViewModel: ObservableObject {
         if layout == .single {
             currentPageIndex += 1
         } else {
-            let currentURL = imageURLs[currentPageIndex]
-            if cachedImage(for: currentURL) == nil {
+            if cachedImage(at: currentPageIndex) == nil {
                 // 图片尚未缓存，保守地只前进一页，避免跳过竖图
                 currentPageIndex += 1
             } else {
@@ -237,9 +274,9 @@ final class ReaderViewModel: ObservableObject {
             return 0
         }
 
-        if isPortrait(imageURLs[previousEnd]),
+        if isPortrait(at: previousEnd),
            previousEnd - 1 >= 1,
-           isPortrait(imageURLs[previousEnd - 1]) {
+           isPortrait(at: previousEnd - 1) {
             return previousEnd - 1
         }
 
@@ -263,6 +300,10 @@ final class ReaderViewModel: ObservableObject {
     private func saveProgress() {
         progressStore.set(versionID: currentVersion.id.uuidString, for: work.id.uuidString)
     }
+
+    deinit {
+        pageProvider?.close()
+    }
 }
 
 enum ReaderLayoutStore {
@@ -283,11 +324,14 @@ enum ReaderLayoutStore {
 
 enum InsertBlankPageError: Error, LocalizedError {
     case missingSourceImage
+    case archiveNotSupported
 
     var errorDescription: String? {
         switch self {
         case .missingSourceImage:
             return "未找到项目内嵌的空白页图片。"
+        case .archiveNotSupported:
+            return "压缩包版本不支持插入空白页。"
         }
     }
 }

@@ -25,6 +25,67 @@ final class ThumbnailCache: ObservableObject {
         try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
     }
 
+    func thumbnail(for version: WorkVersion) async -> NSImage? {
+        let key = version.path as NSURL
+
+        // 1. 内存缓存
+        if let cached = memoryCache.object(forKey: key) {
+            return cached
+        }
+
+        // 2. 磁盘缓存
+        let diskURL = cacheDirectory.appendingPathComponent(version.path.path.sha256).appendingPathExtension("jpg")
+        if let cached = NSImage(contentsOf: diskURL) {
+            memoryCache.setObject(cached, forKey: key)
+            return cached
+        }
+
+        // 3. 后台生成缩略图
+        let thumbnail = await Task.detached(priority: .userInitiated) { [cacheDirectory, maxPixelSize] () -> NSImage? in
+            let image: NSImage?
+            if version.isArchive {
+                image = await Self.firstImage(fromArchive: version.path)
+            } else {
+                guard let imageFiles = try? await FolderScanner.imageFiles(in: version.path),
+                      let first = imageFiles.first else {
+                    return nil
+                }
+                image = NSImage(contentsOf: first)
+            }
+
+            guard let image = image else { return nil }
+            let thumbnail = image.resized(toMax: maxPixelSize)
+
+            // 保存到磁盘
+            let diskURL = cacheDirectory.appendingPathComponent(version.path.path.sha256).appendingPathExtension("jpg")
+            if let data = thumbnail?.jpegData {
+                try? data.write(to: diskURL)
+            }
+
+            return thumbnail
+        }.value
+
+        // 4. 更新内存缓存
+        if let thumbnail = thumbnail {
+            let cost = Int(thumbnail.size.width * thumbnail.size.height * 4)
+            memoryCache.setObject(thumbnail, forKey: key, cost: cost)
+        }
+
+        return thumbnail
+    }
+
+    private static func firstImage(fromArchive archiveURL: URL) async -> NSImage? {
+        do {
+            let provider = try await ArchiveService.provider(for: archiveURL)
+            defer { provider.close() }
+            guard provider.pageCount > 0 else { return nil }
+            return try await provider.image(at: 0)
+        } catch {
+            return nil
+        }
+    }
+
+    @available(*, deprecated, renamed: "thumbnail(for:)")
     func thumbnail(for folder: URL) async -> NSImage? {
         let key = folder as NSURL
 

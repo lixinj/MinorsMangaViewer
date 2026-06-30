@@ -115,7 +115,18 @@ public enum FolderScanner {
         let parsed = NamingParser.parse(folderName: containerName)
 
         var versions: [WorkVersion] = []
-        await collectVersions(in: url, depth: 0, into: &versions, type: type)
+
+        // 压缩包文件直接作为一个版本
+        if ArchiveService.isArchive(url) {
+            versions.append(WorkVersion(
+                name: containerName,
+                path: url,
+                type: type,
+                parsed: parsed
+            ))
+        } else {
+            await collectVersions(in: url, depth: 0, into: &versions, type: type)
+        }
 
         guard !versions.isEmpty else { return nil }
 
@@ -123,12 +134,25 @@ public enum FolderScanner {
         return Work(title: title, author: author, versions: versions)
     }
 
-    private static func collectVersions(in folder: URL, depth: Int, into versions: inout [WorkVersion], type: FolderType) async {
+    private static func collectVersions(in url: URL, depth: Int, into versions: inout [WorkVersion], type: FolderType) async {
         guard depth < 4 else { return }
-        let folderName = sanitizedName(of: folder)
+        let name = sanitizedName(of: url)
+
+        // 压缩包文件直接作为一个版本
+        if ArchiveService.isArchive(url) {
+            versions.append(WorkVersion(
+                name: name,
+                path: url,
+                type: type,
+                parsed: NamingParser.parse(folderName: name)
+            ))
+            return
+        }
+
+        let folderName = name
         let hasImages: Bool
         do {
-            hasImages = !(try await imageFiles(in: folder).isEmpty)
+            hasImages = !(try await imageFiles(in: url).isEmpty)
         } catch {
             hasImages = false
         }
@@ -136,15 +160,15 @@ public enum FolderScanner {
         if hasImages {
             versions.append(WorkVersion(
                 name: folderName,
-                path: folder,
+                path: url,
                 type: type,
                 parsed: NamingParser.parse(folderName: folderName)
             ))
         }
 
-        guard let subfolders = try? contentsOfDirectory(at: folder) else { return }
-        for subfolder in subfolders {
-            await collectVersions(in: subfolder, depth: depth + 1, into: &versions, type: type)
+        guard let subitems = try? contentsOfDirectoryIncludingArchives(at: url) else { return }
+        for subitem in subitems {
+            await collectVersions(in: subitem, depth: depth + 1, into: &versions, type: type)
         }
     }
 
@@ -165,6 +189,19 @@ public enum FolderScanner {
         try FileManager.default
             .contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { !shouldSkipFolder($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// 返回目录下的子文件夹和压缩包文件，用于版本递归收集。
+    private static func contentsOfDirectoryIncludingArchives(at url: URL) throws -> [URL] {
+        try FileManager.default
+            .contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+            .filter { item in
+                if ArchiveService.isArchive(item) { return true }
+                guard let values = try? item.resourceValues(forKeys: [.isDirectoryKey]) else { return false }
+                return values.isDirectory == true
+            }
             .filter { !shouldSkipFolder($0) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
