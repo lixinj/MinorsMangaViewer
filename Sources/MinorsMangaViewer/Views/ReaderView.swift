@@ -289,8 +289,8 @@ struct ReaderView: View {
                 }
                 return event
             case 123, 124, 125, 126: // left, right, down, up
-                if event.modifierFlags.contains(.command) {
-                    self.handleCommandArrow(event.keyCode)
+                if event.modifierFlags.contains(.option) {
+                    self.handleOptionArrow(event.keyCode)
                     return nil
                 }
             default:
@@ -312,7 +312,7 @@ struct ReaderView: View {
         }
     }
 
-    private func handleCommandArrow(_ keyCode: UInt16) {
+    private func handleOptionArrow(_ keyCode: UInt16) {
         let isNext: Bool
         switch viewModel.layout {
         case .doubleRightToLeft:
