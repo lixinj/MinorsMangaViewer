@@ -9,6 +9,7 @@ struct MainWindow: View {
     @State private var filterText = ""
     @State private var readerWorks: [Work] = []
     @State private var readerIndex: Int = 0
+    @State private var libraryWatcher = LibraryWatcher()
 
     var body: some View {
         NavigationSplitView {
@@ -80,6 +81,7 @@ struct MainWindow: View {
         }
         .task {
             if let url = appState.libraryURL {
+                setupWatcher(for: url)
                 await libraryViewModel.loadLibrary(url: url)
             }
         }
@@ -171,9 +173,21 @@ struct MainWindow: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         appState.libraryURL = url
+        setupWatcher(for: url)
         Task {
             await libraryViewModel.loadLibrary(url: url)
         }
+    }
+
+    private func setupWatcher(for url: URL) {
+        libraryWatcher.unwatchAll()
+        libraryWatcher.onFilesChanged = { [weak libraryViewModel] in
+            guard let libraryViewModel else { return }
+            Task {
+                await libraryViewModel.loadLibrary(url: url)
+            }
+        }
+        libraryWatcher.watch(folder: url)
     }
 
     private func openReader(work: Work) {

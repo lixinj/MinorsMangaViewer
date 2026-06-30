@@ -59,6 +59,8 @@ final class LibraryViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
+        SecurityScopedBookmarkManager.shared.startAccessing(path: url.path)
+
         do {
             authors = try await FolderScanner.scan(libraryURL: url)
             if let currentAuthor = selectedAuthor,
