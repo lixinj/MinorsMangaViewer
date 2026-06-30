@@ -517,7 +517,7 @@ struct ReaderView: View {
 
 // MARK: - 阅读器交互覆盖层
 
-/// 一个透明的 AppKit 覆盖层，同时处理左键翻页和右键「插入空白页」。
+/// 一个透明的 AppKit 覆盖层，同时处理左键翻页、右键「插入空白页」和鼠标滚轮翻页。
 /// 右键会根据点击位置自动判断是左页还是右页，只弹出一个菜单项。
 struct ReaderInteractionOverlay: NSViewRepresentable {
     let layout: ReaderLayout
@@ -567,6 +567,11 @@ final class ReaderInteractionOverlayView: NSView {
     private var onPreviousPage: (() -> Void)?
     private var onNextPage: (() -> Void)?
     private var onInsertBlankPage: ((URL) -> Void)?
+
+    /// 滚轮滚动累积量，超过阈值才触发翻页，避免轻微滚动就翻页。
+    private var scrollAccumulator: CGFloat = 0
+    /// 触发一次翻页所需的最小滚动量。数值越大灵敏度越低。
+    private let scrollThreshold: CGFloat = 40
 
     func update(
         layout: ReaderLayout,
@@ -626,6 +631,24 @@ final class ReaderInteractionOverlayView: NSView {
     @objc private func handleInsertBlankPage(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
         onInsertBlankPage?(url)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        scrollAccumulator += event.scrollingDeltaY
+
+        if isVersionMenuPresented {
+            onCloseVersionMenu?()
+        }
+
+        // scrollingDeltaY < 0：向下滚动 → 下一页
+        // scrollingDeltaY > 0：向上滚动 → 上一页
+        if scrollAccumulator <= -scrollThreshold {
+            scrollAccumulator += scrollThreshold
+            onNextPage?()
+        } else if scrollAccumulator >= scrollThreshold {
+            scrollAccumulator -= scrollThreshold
+            onPreviousPage?()
+        }
     }
 
     private enum Side { case left, right }
