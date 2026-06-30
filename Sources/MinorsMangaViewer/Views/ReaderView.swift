@@ -569,9 +569,9 @@ final class ReaderInteractionOverlayView: NSView {
     private var onInsertBlankPage: ((URL) -> Void)?
 
     /// 滚轮滚动累积量，超过阈值才触发翻页，避免轻微滚动就翻页。
-    private var scrollAccumulator: CGFloat = 0
+    private var scrollAccumulator: CGFloat = 1
     /// 触发一次翻页所需的最小滚动量。数值越大灵敏度越低。
-    private let scrollThreshold: CGFloat = 15
+    private let scrollThreshold: CGFloat = 5
 
     func update(
         layout: ReaderLayout,
@@ -634,19 +634,28 @@ final class ReaderInteractionOverlayView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        scrollAccumulator += event.scrollingDeltaY
-
         if isVersionMenuPresented {
             onCloseVersionMenu?()
         }
 
-        // scrollingDeltaY < 0：向下滚动 → 下一页
-        // scrollingDeltaY > 0：向上滚动 → 上一页
-        if scrollAccumulator <= -scrollThreshold {
-            scrollAccumulator += scrollThreshold
-            onNextPage?()
-        } else if scrollAccumulator >= scrollThreshold {
+        // 普通鼠标滚轮（非精确滚动）：每一格直接翻一页，避免累积导致反应迟钝
+        if !event.hasPreciseScrollingDeltas {
+            if event.scrollingDeltaY > 0 {
+                onNextPage?()
+            } else if event.scrollingDeltaY < 0 {
+                onPreviousPage?()
+            }
+            return
+        }
+
+        // 触控板 / Magic Mouse：累积滚动量，超过阈值再翻页
+        scrollAccumulator += event.scrollingDeltaY
+
+        if scrollAccumulator >= scrollThreshold {
             scrollAccumulator -= scrollThreshold
+            onNextPage?()
+        } else if scrollAccumulator <= -scrollThreshold {
+            scrollAccumulator += scrollThreshold
             onPreviousPage?()
         }
     }
