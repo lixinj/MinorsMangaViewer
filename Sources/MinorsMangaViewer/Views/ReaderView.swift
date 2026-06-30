@@ -275,7 +275,15 @@ struct ReaderView: View {
     }
 
     private func startKeyMonitor() {
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { event in
+            // Option+左键点击：进入下一页；如果在最后一页则进入下一部作品
+            if event.type == .leftMouseDown && event.modifierFlags.contains(.option) {
+                self.advancePageOrNextWork()
+                return nil
+            }
+
+            guard event.type == .keyDown else { return event }
+
             switch event.keyCode {
             case 48: // tab
                 self.handleVersionTab()
@@ -387,7 +395,6 @@ struct ReaderView: View {
                     },
                     onPreviousPage: { viewModel.previousPage() },
                     onNextPage: { viewModel.nextPage() },
-                    onAdvancePageOrWork: advancePageOrNextWork,
                     onInsertBlankPage: insertBlankPage
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -528,7 +535,7 @@ struct ReaderView: View {
 
 // MARK: - 阅读器交互覆盖层
 
-/// 一个透明的 AppKit 覆盖层，同时处理左键翻页、右键「插入空白页」、鼠标滚轮翻页和 Option+点击进阶。
+/// 一个透明的 AppKit 覆盖层，同时处理左键翻页、右键「插入空白页」和鼠标滚轮翻页。
 /// 右键会根据点击位置自动判断是左页还是右页，只弹出一个菜单项。
 struct ReaderInteractionOverlay: NSViewRepresentable {
     let layout: ReaderLayout
@@ -538,7 +545,6 @@ struct ReaderInteractionOverlay: NSViewRepresentable {
     let onCloseVersionMenu: () -> Void
     let onPreviousPage: () -> Void
     let onNextPage: () -> Void
-    let onAdvancePageOrWork: () -> Void
     let onInsertBlankPage: (URL) -> Void
 
     func makeNSView(context: Context) -> ReaderInteractionOverlayView {
@@ -551,7 +557,6 @@ struct ReaderInteractionOverlay: NSViewRepresentable {
             onCloseVersionMenu: onCloseVersionMenu,
             onPreviousPage: onPreviousPage,
             onNextPage: onNextPage,
-            onAdvancePageOrWork: onAdvancePageOrWork,
             onInsertBlankPage: onInsertBlankPage
         )
         return view
@@ -566,7 +571,6 @@ struct ReaderInteractionOverlay: NSViewRepresentable {
             onCloseVersionMenu: onCloseVersionMenu,
             onPreviousPage: onPreviousPage,
             onNextPage: onNextPage,
-            onAdvancePageOrWork: onAdvancePageOrWork,
             onInsertBlankPage: onInsertBlankPage
         )
     }
@@ -580,7 +584,6 @@ final class ReaderInteractionOverlayView: NSView {
     private var onCloseVersionMenu: (() -> Void)?
     private var onPreviousPage: (() -> Void)?
     private var onNextPage: (() -> Void)?
-    private var onAdvancePageOrWork: (() -> Void)?
     private var onInsertBlankPage: ((URL) -> Void)?
 
     /// 滚轮滚动累积量，超过阈值才触发翻页，避免轻微滚动就翻页。
@@ -596,7 +599,6 @@ final class ReaderInteractionOverlayView: NSView {
         onCloseVersionMenu: @escaping () -> Void,
         onPreviousPage: @escaping () -> Void,
         onNextPage: @escaping () -> Void,
-        onAdvancePageOrWork: @escaping () -> Void,
         onInsertBlankPage: @escaping (URL) -> Void
     ) {
         self.layout = layout
@@ -606,19 +608,12 @@ final class ReaderInteractionOverlayView: NSView {
         self.onCloseVersionMenu = onCloseVersionMenu
         self.onPreviousPage = onPreviousPage
         self.onNextPage = onNextPage
-        self.onAdvancePageOrWork = onAdvancePageOrWork
         self.onInsertBlankPage = onInsertBlankPage
     }
 
     override func mouseDown(with event: NSEvent) {
         if isVersionMenuPresented {
             onCloseVersionMenu?()
-        }
-
-        // Option+点击：进入下一页；如果在最后一页则进入下一部作品
-        if event.modifierFlags.contains(.option) {
-            onAdvancePageOrWork?()
-            return
         }
 
         let location = convert(event.locationInWindow, from: nil)
