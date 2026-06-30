@@ -276,8 +276,9 @@ struct ReaderView: View {
 
     private func startKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { event in
-            // Option+左键点击：进入下一页；如果在最后一页则进入下一部作品
-            if event.type == .leftMouseDown && event.modifierFlags.contains(.option) {
+            // Option/Command+左键点击：进入下一页；如果在最后一页则进入下一部作品
+            if event.type == .leftMouseDown &&
+               (event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command)) {
                 self.advancePageOrNextWork()
                 return nil
             }
