@@ -44,7 +44,7 @@ public enum FolderScanner {
     }
 
     public static func collections(for author: Author) async throws -> [WorkCollection] {
-        let topLevelURLs = try contentsOfDirectory(at: author.path)
+        let topLevelURLs = try contentsOfDirectoryIncludingArchives(at: author.path)
         var collections: [WorkCollection] = []
         var rootWorks: [Work] = []
 
@@ -96,7 +96,7 @@ public enum FolderScanner {
 
     public static func scanWorks(inCategory categoryURL: URL, author: Author) async throws -> [Work] {
         let folderType = FolderType.from(folderName: categoryURL.lastPathComponent)
-        let urls = try contentsOfDirectory(at: categoryURL)
+        let urls = try contentsOfDirectoryIncludingArchives(at: categoryURL)
         var works: [Work] = []
 
         for url in urls {

@@ -16,6 +16,7 @@ final class ReaderViewModel: ObservableObject {
     @Published var layout: ReaderLayout
     @Published var isLoading = false
     @Published var filenameFilters: [String] = []
+    @Published var errorMessage: String?
 
     private let progressStore = ReadingProgressStore.shared
     @Published private var imageCache: [Int: NSImage] = [:]
@@ -185,6 +186,7 @@ final class ReaderViewModel: ObservableObject {
 
     func loadVersion(_ version: WorkVersion, preservingPage: Bool = true) async {
         isLoading = true
+        errorMessage = nil
         defer { isLoading = false }
 
         let previousPage = currentPageIndex
@@ -232,6 +234,7 @@ final class ReaderViewModel: ObservableObject {
             imageURLs = []
             currentPageIndex = 0
             isArchiveVersion = false
+            errorMessage = error.localizedDescription
         }
     }
 

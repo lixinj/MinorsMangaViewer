@@ -42,6 +42,9 @@ struct ReaderView: View {
                     if viewModel.isLoading {
                         ProgressView("加载图片中…")
                             .foregroundStyle(.white)
+                    } else if viewModel.errorMessage != nil {
+                        ContentUnavailableView("加载失败", systemImage: "exclamationmark.triangle", description: Text(viewModel.errorMessage ?? ""))
+                            .foregroundStyle(.white)
                     } else if viewModel.imageURLs.isEmpty {
                         ContentUnavailableView("没有图片", systemImage: "photo")
                             .foregroundStyle(.white)

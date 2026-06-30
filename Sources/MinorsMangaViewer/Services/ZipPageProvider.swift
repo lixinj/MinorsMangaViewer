@@ -1,10 +1,16 @@
 import AppKit
 import Foundation
 import ZIPFoundation
+import os.log
+
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "MinorsMangaViewer",
+    category: "ZipPageProvider"
+)
 
 /// 从 ZIP/CBZ 压缩包中读取图片的页面提供者。
 ///
-/// 初始化时把压缩包解压到临时目录，按自然顺序收集图片。
+/// 初始化时把压缩包解压到临时目录，递归收集所有图片。
 /// `close()` 时删除临时目录。
 final class ZipPageProvider: PageProvider, @unchecked Sendable {
     let pageCount: Int
@@ -19,11 +25,18 @@ final class ZipPageProvider: PageProvider, @unchecked Sendable {
         try fileManager.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         self.tempDirectory = tempRoot
 
-        try Self.extractArchive(archive, to: tempRoot)
+        do {
+            try Self.extractArchive(archive, to: tempRoot)
+        } catch {
+            logger.error("Failed to extract zip \(archive.path): \(error.localizedDescription)")
+            try? fileManager.removeItem(at: tempRoot)
+            throw error
+        }
 
-        let urls = try Self.collectImageFiles(in: tempRoot)
+        let urls = Self.collectImageFiles(in: tempRoot)
         self.imageURLs = urls
         self.pageCount = urls.count
+        logger.info("ZipPageProvider prepared \(urls.count) images from \(archive.lastPathComponent)")
     }
 
     func image(at index: Int) async throws -> NSImage {
@@ -55,22 +68,25 @@ final class ZipPageProvider: PageProvider, @unchecked Sendable {
         }
     }
 
-    private static func collectImageFiles(in folder: URL) throws -> [URL] {
+    /// 递归收集目录及其子目录中的图片文件。
+    private static func collectImageFiles(in folder: URL) -> [URL] {
         let extensions = Set(["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "heic"])
-        return try FileManager.default
-            .contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-            .filter { url in
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                   isDirectory.boolValue {
-                    return false
-                }
-                return extensions.contains(url.pathExtension.lowercased())
-            }
-            .sorted { naturalPageCompare($0.lastPathComponent, $1.lastPathComponent) }
-    }
-}
+        var result: [URL] = []
 
-private func naturalCompare(_ lhs: String, _ rhs: String) -> Bool {
-    lhs.compare(rhs, options: [.numeric, .caseInsensitive, .widthInsensitive]) == .orderedAscending
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
+                  values.isDirectory == false,
+                  extensions.contains(url.pathExtension.lowercased())
+            else { continue }
+            result.append(url)
+        }
+
+        return result.sorted { naturalPageCompare($0.path, $1.path) }
+    }
 }
