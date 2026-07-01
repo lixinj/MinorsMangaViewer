@@ -237,13 +237,15 @@ public enum FolderScanner {
     }
 
     private static func bestTitle(for parsed: ParsedFolderName, versions: [WorkVersion], fallback: String) -> String {
+        let title: String
         if !parsed.displayTitle.isEmpty {
-            return parsed.displayTitle
+            title = parsed.displayTitle
+        } else if let firstNonEmpty = versions.first(where: { !$0.parsed.displayTitle.isEmpty }) {
+            title = firstNonEmpty.parsed.displayTitle
+        } else {
+            title = fallback
         }
-        if let firstNonEmpty = versions.first(where: { !$0.parsed.displayTitle.isEmpty }) {
-            return firstNonEmpty.parsed.displayTitle
-        }
-        return fallback
+        return title.trimmingCharacters(in: .whitespaces)
     }
 
     private static func naturalCompare(_ lhs: String, _ rhs: String) -> Bool {

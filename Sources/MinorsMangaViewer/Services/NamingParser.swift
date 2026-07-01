@@ -12,8 +12,9 @@ public enum NamingParser {
         let parenPattern = #"\(([^)]*)\)"#
         let bracketPattern = #"\[([^\]]*)\]"#
 
-        let parens = extractMatches(pattern: parenPattern, from: &remaining)
+        // 先提取方括号内容，避免方括号内的圆括号被当作 prefix/originalIP
         let brackets = extractMatches(pattern: bracketPattern, from: &remaining)
+        let parens = extractMatches(pattern: parenPattern, from: &remaining)
 
         if let firstParen = parens.first {
             prefix = firstParen
@@ -31,7 +32,9 @@ public enum NamingParser {
 
         let title = remaining
             .trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "  ", with: " ")
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
 
         // 如果文件夹名只有方括号内容（如 [汉化组]），把它视为标签而非作者信息
         var finalCreatorInfo = creatorInfo
